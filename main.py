@@ -1,12 +1,12 @@
 import threading
 import queue
-from server import TCPServer
+from server import Server
 from plotter import DynamicPlotter
 
 if __name__ == '__main__':
     data_queue = queue.Queue()
 
-    server = TCPServer(data_queue)
+    server = Server(data_queue)
     plotter = DynamicPlotter(data_queue)
 
     host = "163.117.150.172"
