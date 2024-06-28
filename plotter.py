@@ -1,141 +1,212 @@
-import time
 import datetime
 import queue
+from dataclasses import dataclass
+
+from matplotlib.axes import Axes
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import numpy as np
 import pandas as pd
 
+from vclog import Logger
 
-class DynamicPlotter:
-    def __init__(self, data_queue: queue.Queue, window_size: int = 19200) -> None:
+
+logger = Logger("server")
+
+
+@dataclass
+class PlotInfo:
+    window: int
+    signals: list[str]
+    limits: tuple[float, float]
+    title: str
+    y_label: str
+    x_label: str
+    color: list[str]
+
+
+@dataclass
+class AxInfo:
+    t: np.ndarray
+    ys: list[np.ndarray]
+    ax: Axes
+    lines: list
+    signals: list[str]
+
+    def update_time(self, t: float) -> None:
+        self.t = np.append(self.t[1:], t)
+        for l in self.lines:
+            l.set_xdata(self.t)
+
+    def update_y(self, y: list[float]) -> None:
+        for i, l in enumerate(self.lines):
+            self.ys[i] = np.append(self.ys[i][1:], y[i])
+            l.set_ydata(self.ys[i])
+
+    def update(self) -> None:
+        self.ax.relim()
+        self.ax.autoscale_view(True, True, True)
+
+    def clear(self) -> None:
+        self.t = np.zeros_like(self.t)
+
+        for i in range(len(self.signals)):
+            self.ys[i] = np.zeros_like(self.ys[i])
+            self.lines[i].set_ydata(self.ys[i])
+            self.lines[i].set_xdata(self.t)
+
+
+class Data:
+    def __init__(self) -> None:
+        self.data: dict[str, list[float]] = {}
+
+    def extend(self, d: dict[str, float]) -> None:
+        for k, v in d.items():
+            if k in self.data:
+                self.data[k].append(v)
+            else:
+                self.data[k] = [v]
+
+    def clear(self) -> None:
+        self.data.clear()
+
+    def __getitem__(self, key: str) -> float:
+        try:
+            return self.data[key][-1]
+        except:
+            logger.warning(f"unknown key {key}")
+            return 0.0
+
+    def __bool__(self) -> bool:
+        return bool(self.data)
+
+
+class Plotter:
+    def __init__(self,
+                 data_queue: queue.Queue,
+                 plot_info_list: list[PlotInfo],
+                 ) -> None:
         self.data_queue = data_queue
-        self.window_size = window_size
-        self.stored_data = {}
-        self.data_initialized = False
-        self.disconnected_counter = 0
-        self.saved_data = False
+        self.data = Data()
+        self.timeout = 0
+        self.client_connected = False
 
-        _, self.ax = plt.subplots(1, 2, figsize=(30, 20))
+        plt.figure(figsize=(30, 20))
+        gs = gridspec.GridSpec(2, 2, width_ratios=[0.45, 0.55])
 
-        x = np.zeros(window_size)
-        # LEFT
-        self.control_signal_y = np.zeros(window_size)
-        self.control_signal_line, = self.ax[0].plot(x, self.control_signal_y, label="control_signal")
-
-        self.control_signal_2_y = np.zeros(window_size)
-        self.control_signal_2_line, = self.ax[0].plot(x, self.control_signal_2_y, label="resistance")
-        self.ax[0].set_ylabel("Resistance (\u03A9)")
-        self.ax[0].set_xlabel("Time (s)")
-
-        # RIGHT
-        self.reference_y = np.zeros(window_size)
-        self.reference_line, = self.ax[1].plot(x, self.reference_y, label="reference")
-
-        self.position_y = np.zeros(window_size)
-        self.position_line, = self.ax[1].plot(x, self.position_y, label="position")
-
-        self.time_elapsed = np.zeros(window_size)
-
-        self.ax[0].set_ylim(0, 3.3)
-        # self.ax[1].set_ylim(0, 45_000)
-
-        for i in range(2):
-            self.ax[i].legend()
-            self.ax[i].autoscale_view(True, True, True)
+        self.up_left_ax = self._init_ax(plot_info_list[0], gs, 0)
+        self.down_left_ax = self._init_ax(plot_info_list[1], gs, 1)
+        self.right_ax = self._init_ax(plot_info_list[2], gs, 2)
 
         plt.ion()
 
-    def _reset_plots(self) -> None:
-        x = np.zeros(self.window_size)
-        y = np.zeros(self.window_size)
+    def _init_ax(self, plot_info: PlotInfo, gs: gridspec.GridSpec, position: int) -> AxInfo:
+        match position:
+            case 0:
+                ax = plt.subplot(gs[0, 0])
+            case 1:
+                ax = plt.subplot(gs[1, 0])
+            case 2:
+                ax = plt.subplot(gs[:, 1])
+            case _:
+                raise ValueError("wrong number of plots")
 
-        self.time_elapsed = x
-        self.reference_y = y
-        self.position_y = y
-        # self.control_signal_y = y
+        n_signals = len(plot_info.signals)
+        t = np.zeros(plot_info.window)
+        y = np.zeros(plot_info.window)
 
-        self.reference_line.set_xdata(x)
-        self.reference_line.set_ydata(y)
+        lines = []
+        ys = []
+        for i in range(n_signals):
+            line, = ax.plot(t, y, label=plot_info.signals[i], color=plot_info.color[i])
+            lines.append(line)
+            ys.append(y)
 
-        self.position_line.set_xdata(x)
-        self.position_line.set_ydata(y)
+        ax.set_title(plot_info.title)
+        ax.set_ylabel(plot_info.y_label)
+        ax.set_xlabel(plot_info.x_label)
+        ax.set_ylim(*plot_info.limits)
+        ax.legend()
+        ax.autoscale_view(True, True, True)
 
-        # self.control_signal_line.set_xdata(x)
-        # self.control_signal_line.set_ydata(y)
-
-        self.control_signal_2_line.set_xdata(x)
-        self.control_signal_2_line.set_xdata(x)
+        return AxInfo(t, ys, ax, lines, plot_info.signals)
 
     def start(self) -> None:
         while True:
-            if self.data_queue.empty():
-                self.disconnected_counter += 1
-                time.sleep(0.001)
-                if self.disconnected_counter > 1_000 and not self.saved_data:
-                    print("Client is no longer detected")
-                    self._reset_plots()
-                    self.save()
-                    self.saved_data = True
-                    self.data_initialized = False
+            self._start()
 
-                continue
+    def _is_client_connected(self) -> bool:
+        if self.data_queue.empty() and not self.client_connected:
+            return False
 
-            while not self.data_queue.empty():
-                self.disconnected_counter = 0
-                self.saved_data = False
+        if self.data_queue.empty():
+            self.timeout += 1
+        else:
+            self.timeout = 0
 
-                if not self.data_initialized:
-                    data = self.data_queue.get()
-                    for key, value in data.items():
-                        self.stored_data[key] = np.array([])
+        if self.timeout > 100:
+            return False
 
-                    for key, value in data.items():
-                        array = self.stored_data[key]
-                        self.stored_data[key] = np.append(array, value)
+        return True
 
-                    self.data_initialized = True
+    def _start(self) -> None:
+        # check client connection
+        client_connected: bool = self._is_client_connected()
 
-                data = self.data_queue.get()
+        # reset plots and save data if the client just disconnected
+        if not client_connected and self.client_connected:
+            date = datetime.datetime.now().strftime("%d-%m-%Y@%H:%M:%S")
+            logger.info(f"client is no longer detected: {date}")
+            self.save()
 
-                for key, value in data.items():
-                    array = self.stored_data[key]
-                    self.stored_data[key] = np.append(array, value)
+            self.up_left_ax.clear()
+            self.down_left_ax.clear()
+            self.right_ax.clear()
 
-                self.reference_y = np.append(self.reference_y[1:], data["reference"])
-                self.reference_line.set_ydata(self.reference_y)
+            self.client_connected = False
 
-                self.position_y = np.append(self.position_y[1:], data["position"])
-                self.position_line.set_ydata(self.position_y)
+        # update client connection status
+        if client_connected and not self.client_connected:
+            date = datetime.datetime.now().strftime("%d-%m-%Y@%H:%M:%S")
+            logger.info(f"client is detected: {date}")
+            self.client_connected = True
 
-                self.control_signal_y = np.append(self.control_signal_y[1:], data["master_control"]/100)
-                self.control_signal_line.set_ydata(self.control_signal_y)
+        # do not update plots if there is no client
+        if not client_connected and not self.client_connected:
+            return
 
-                # voltage = data["resistance"]
-                # resistance = 150*voltage/(3.3-voltage)
-                resistance = data["resistance"]
-                self.control_signal_2_y = np.append(self.control_signal_2_y[1:], resistance)
-                self.control_signal_2_line.set_ydata(self.control_signal_2_y)
+        # get all data from the queue
+        while not self.data_queue.empty():
+            self.data.extend(self.data_queue.get())
 
-                self.time_elapsed = np.append(self.time_elapsed[1:], data["time"])
+            # update the plots
+            self.up_left_ax.update_time(self.data["time"])
+            self.up_left_ax.update_y([self.data[s] for s in self.up_left_ax.signals])
 
-                self.reference_line.set_xdata(self.time_elapsed)
-                self.position_line.set_xdata(self.time_elapsed)
-                self.control_signal_line.set_xdata(self.time_elapsed)
-                self.control_signal_2_line.set_xdata(self.time_elapsed)
+            self.down_left_ax.update_time(self.data["time"])
+            self.down_left_ax.update_y([self.data[s] for s in self.down_left_ax.signals])
 
-            for i in range(2):
-                self.ax[i].relim()
-                self.ax[i].autoscale_view(True, True, True)
+            self.right_ax.update_time(self.data["time"])
+            self.right_ax.update_y([self.data[s] for s in self.right_ax.signals])
 
-            plt.draw()
-            plt.pause(0.001)
+        # update plot
+        self.up_left_ax.update()
+        self.down_left_ax.update()
+        self.right_ax.update()
+
+        plt.draw()
+        plt.pause(0.001)
 
     def save(self) -> None:
-        filename = f"tests/{datetime.datetime.now()}.csv".replace(" ", "_")
-        if self.stored_data:
-            pd.DataFrame(self.stored_data).to_csv(filename, index=False)
-            print(f"Saved file as {filename}")
-            self.stored_data.clear()
+        if not self.data:
+            return
+
+        date = datetime.datetime.now().strftime("%d-%m-%Y@%H:%M:%S")
+        filename = f"tests/{date}.csv"
+        pd.DataFrame(self.data.data).to_csv(filename, index=False)
+        logger.info(f"Saved file as {filename}")
+
+        self.data.clear()
 
     def close(self):
         plt.ioff()
