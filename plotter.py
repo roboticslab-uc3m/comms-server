@@ -1,3 +1,4 @@
+import os
 import datetime
 import queue
 from dataclasses import dataclass
@@ -83,9 +84,12 @@ class Data:
 
 class Plotter:
     def __init__(self,
+                 save_path: str,
                  data_queue: queue.Queue,
                  plot_info_list: list[PlotInfo],
                  ) -> None:
+        self.save_path = save_path
+
         self.data_queue = data_queue
         self.data = Data()
         self.timeout = 0
@@ -125,7 +129,7 @@ class Plotter:
         ax.set_title(plot_info.title)
         ax.set_ylabel(plot_info.y_label)
         ax.set_xlabel(plot_info.x_label)
-        ax.set_ylim(*plot_info.limits)
+        ax.set_ylim(plot_info.limits[0]-1, plot_info.limits[1]+1)
         ax.legend()
         ax.autoscale_view(True, True, True)
 
@@ -202,7 +206,7 @@ class Plotter:
             return
 
         date = datetime.datetime.now().strftime("%d-%m-%Y@%H:%M:%S")
-        filename = f"tests/{date}.csv"
+        filename = os.path.join(self.save_path, f"{date}.csv")
         pd.DataFrame(self.data.data).to_csv(filename, index=False)
         logger.info(f"Saved file as {filename}")
 

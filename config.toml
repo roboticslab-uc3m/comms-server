@@ -1,0 +1,39 @@
+[plot]
+time_window = 120 # s
+dt = 0.01 # s
+
+[server]
+ip = "10.118.75.105"
+port = 8080
+
+[save]
+path = "tests/"
+
+[plot.upper_left]
+signals = ["voltage"]
+colors = ["red"]
+limits = [0, 5]
+title = "Voltage"
+ylabel = "Voltage (V)"
+
+[plot.lower_left]
+signals = ["reference", "strain"]
+colors = ["black", "red"]
+limits = [0, 20]
+title = "Reference and Strain"
+ylabel = "Strain (%)"
+
+[plot.right]
+signals = ["voltage"]
+colors = ["purple"]
+limits = [0, 5]
+title = "Voltage"
+ylabel = "Voltage (V)"
+
+[colors]
+red = "#cf7171"
+green = "#dbe8c1"
+blue = "#aecdd2"
+yellow = "#fadf7f"
+purple = "#c696bc"
+black = "#4d5359"
