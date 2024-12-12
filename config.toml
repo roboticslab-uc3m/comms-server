@@ -3,15 +3,15 @@ time_window = 120 # s
 dt = 0.01 # s
 
 [server]
-ip = "10.118.75.105"
+ip = "10.118.70.12"
 port = 8080
 
 [save]
 path = "tests/"
 
 [plot.upper_left]
-signals = ["voltage"]
-colors = ["red"]
+signals = ["voltage", "voltage_filt"]
+colors = ["black", "blue"]
 limits = [0, 5]
 title = "Voltage"
 ylabel = "Voltage (V)"
@@ -19,16 +19,16 @@ ylabel = "Voltage (V)"
 [plot.lower_left]
 signals = ["reference", "strain"]
 colors = ["black", "red"]
-limits = [0, 20]
+limits = [0, 50]
 title = "Reference and Strain"
 ylabel = "Strain (%)"
 
 [plot.right]
-signals = ["voltage"]
-colors = ["purple"]
-limits = [0, 5]
-title = "Voltage"
-ylabel = "Voltage (V)"
+signals = ["voltage_rel", "voltage_filt_rel"]
+colors = ["black", "yellow"]
+limits = [0, 100]
+title = "AR/R (%)"
+ylabel = "AR/R (%)"
 
 [colors]
 red = "#cf7171"
